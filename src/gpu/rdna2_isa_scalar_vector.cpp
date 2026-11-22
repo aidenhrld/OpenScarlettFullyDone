@@ -577,12 +577,16 @@ std::vector<ScalarVectorOpcodeEntry> BuildScalarVectorOpcodeTable() {
     add(Enc::SMEM, 0x0A, "s_buffer_load_dwordx4", 1, true, true, false, false, false, false, false, 32, DK::Untyped, SC::ScalarMemory);
     add(Enc::SMEM, 0x0B, "s_buffer_load_dwordx8", 1, true, true, false, false, false, false, false, 32, DK::Untyped, SC::ScalarMemory);
     add(Enc::SMEM, 0x0C, "s_buffer_load_dwordx16", 1, true, true, false, false, false, false, false, 32, DK::Untyped, SC::ScalarMemory);
+    add(Enc::SMEM, 0x10, "s_scratch_load_dword", 1, true, true, false, false, false, false, false, 32, DK::Untyped, SC::ScalarMemory);
+    add(Enc::SMEM, 0x11, "s_scratch_load_dwordx2", 1, true, true, true, false, false, false, false, 64, DK::Untyped, SC::ScalarMemory);
+    add(Enc::SMEM, 0x12, "s_scratch_load_dwordx4", 1, true, true, false, false, false, false, false, 32, DK::Untyped, SC::ScalarMemory);
     add(Enc::SMEM, 0x1F, "s_gl1_inv", 0, false, false, false, false, false, false, false, 32, DK::Untyped, SC::ScalarSystem);
     add(Enc::SMEM, 0x20, "s_dcache_inv", 0, false, false, false, false, false, false, false, 32, DK::Untyped, SC::ScalarSystem);
     add(Enc::SMEM, 0x24, "s_memtime", 0, true, true, true, false, false, false, false, 64, DK::UnsignedInt, SC::ScalarSystem);
     add(Enc::SMEM, 0x25, "s_memrealtime", 0, true, true, true, false, false, false, false, 64, DK::UnsignedInt, SC::ScalarSystem);
     add(Enc::SMEM, 0x26, "s_atc_probe", 1, false, false, false, false, false, false, false, 32, DK::Untyped, SC::ScalarSystem);
     add(Enc::SMEM, 0x27, "s_atc_probe_buffer", 1, false, false, false, false, false, false, false, 32, DK::Untyped, SC::ScalarSystem);
+    add(Enc::SMEM, 0x2A, "s_get_waveid_in_workgroup", 0, true, true, false, false, false, false, false, 32, DK::UnsignedInt, SC::ScalarSystem);
     {
         static constexpr const char* kAtomOps[13] = {
             "swap", "cmpswap", "add", "sub", "smin", "umin", "smax",
@@ -702,7 +706,7 @@ std::vector<ScalarVectorOpcodeEntry> BuildScalarVectorOpcodeTable() {
     add(Enc::VOP2, 0x04, "v_sub_f32", 2, true, false, false, false, false, false, false, 32, DK::Float, SC::VectorFloatArith);
     add(Enc::VOP2, 0x05, "v_subrev_f32", 2, true, false, false, false, false, false, false, 32, DK::Float, SC::VectorFloatArith);
     add(Enc::VOP2, 0x06, "v_fmac_legacy_f32", 2, true, false, false, false, false, false, false, 32, DK::Float, SC::VectorFmaMad);
-    add(Enc::VOP2, 0x07, "v_mul_legacy_f32", 2, true, false, false, false, false, false, false, 32, DK::Float, SC::VectorFloatArith);
+    add(Enc::VOP2, 0x07, "v_mul_dx9_zero_f32", 2, true, false, false, false, false, false, false, 32, DK::Float, SC::VectorFloatArith);
     add(Enc::VOP2, 0x08, "v_mul_f32", 2, true, false, false, false, false, false, false, 32, DK::Float, SC::VectorFloatArith);
     add(Enc::VOP2, 0x09, "v_mul_i32_i24", 2, true, false, false, false, false, false, false, 32, DK::SignedInt, SC::VectorIntArith);
     add(Enc::VOP2, 0x0A, "v_mul_hi_i32_i24", 2, true, false, false, false, false, false, false, 32, DK::SignedInt, SC::VectorIntArith);
@@ -1171,6 +1175,7 @@ const ScalarVectorOpcodeEntry* LookupScalarVectorOpcode(
 
 const ScalarVectorOpcodeEntry* LookupScalarVectorByName(const char* mnemonic) noexcept {
     if (!mnemonic || mnemonic[0] == '\0') return nullptr;
+    if (std::strcmp(mnemonic, "v_mul_legacy_f32") == 0) mnemonic = "v_mul_dx9_zero_f32";
     const auto& idx = GetIndex();
     auto it = idx.by_name.find(mnemonic);
     return (it != idx.by_name.end()) ? it->second : nullptr;
