@@ -1518,14 +1518,14 @@ std::atomic<int> g_openscarlett_active_cursor_locks{0};
 class GameInputImpl final : public IGameInput, public IGameInputEx {
 public:
     GameInputImpl() {
-        char* env_lock = nullptr;
-        size_t env_len = 0;
-        if (_dupenv_s(&env_lock, &env_len, "OPENSCARLETT_CURSOR_LOCK") == 0 && env_lock != nullptr) {
-            if (env_lock[0] == '1' && env_lock[1] == '\0') {
-                SetCursorLocked(true);
-            }
-            std::free(env_lock);
+#if defined(_WIN32)
+        char env_lock[16]{};
+        const DWORD env_len = ::GetEnvironmentVariableA(
+            "OPENSCARLETT_CURSOR_LOCK", env_lock, static_cast<DWORD>(sizeof(env_lock)));
+        if (env_len == 1u && env_lock[0] == '1') {
+            SetCursorLocked(true);
         }
+#endif
         default_device_ = CreateTrackedDevice(
             0u,
             GameInputKindGamepad | GameInputKindController | GameInputKindUiNavigation,
@@ -1776,6 +1776,9 @@ public:
         if (want_mouse || (want_gamepad && vpad_fallback)) {
             std::lock_guard<std::mutex> mlk(raw_mouse_mutex_);
             if (input_allowed) {
+                if (!use_injected) {
+                    PollCursorLockToggleLocked();
+                }
                 if (!use_injected && total_mouse_packets_ == 0ull &&
                     !raw_mouse_registered_.load(std::memory_order_acquire)) {
                     PollFallbackCursorMouseLocked();
@@ -1795,6 +1798,9 @@ public:
                     raw_dx = pending_mouse_dx_;
                     raw_dy = pending_mouse_dy_;
                 }
+            } else {
+                f8_prev_down_ = false;
+                fallback_was_cursor_locked_ = false;
             }
         }
 
@@ -2608,7 +2614,7 @@ private:
         raw_mouse_ring_.push_back(pkt);
     }
 
-    void PollFallbackCursorMouseLocked() noexcept {
+    void PollCursorLockToggleLocked() noexcept {
 #if defined(_WIN32)
         HWND fg = ::GetForegroundWindow();
         DWORD fg_pid = 0;
@@ -2624,9 +2630,23 @@ private:
         } else {
             f8_prev_down_ = false;
         }
+#endif
+    }
+
+    void PollFallbackCursorMouseLocked() noexcept {
+#if defined(_WIN32)
+        HWND fg = ::GetForegroundWindow();
+        DWORD fg_pid = 0;
+        const bool fg_owned = (fg != nullptr &&
+                               ::GetWindowThreadProcessId(fg, &fg_pid) != 0 &&
+                               fg_pid == ::GetCurrentProcessId());
+        const bool locked_now = fg_owned && IsCursorLocked();
+        const bool just_locked = locked_now && !fallback_was_cursor_locked_;
+        fallback_was_cursor_locked_ = locked_now;
+
         POINT pt{};
         if (::GetCursorPos(&pt) != FALSE) {
-            if (cursor_fallback_valid_) {
+            if (cursor_fallback_valid_ && !just_locked) {
                 const int64_t dx = static_cast<int64_t>(pt.x - cursor_fallback_last_.x);
                 const int64_t dy = static_cast<int64_t>(pt.y - cursor_fallback_last_.y);
                 fallback_mouse_x_ += dx;
@@ -2639,7 +2659,7 @@ private:
             }
             cursor_fallback_last_ = pt;
             cursor_fallback_valid_ = true;
-            if (fg_owned && IsCursorLocked()) {
+            if (locked_now) {
                 RECT cr{};
                 if (::GetClientRect(fg, &cr) != FALSE && cr.right > cr.left && cr.bottom > cr.top) {
                     POINT center{(cr.left + cr.right) / 2, (cr.top + cr.bottom) / 2};
@@ -2773,6 +2793,7 @@ private:
     std::atomic<bool> raw_mouse_registered_{false};
     std::atomic<bool> cursor_lock_enabled_{false};
     bool f8_prev_down_{false};
+    bool fallback_was_cursor_locked_{false};
     std::mutex raw_mouse_mutex_;
     int64_t mouse_cumulative_x_ = 0;
     int64_t mouse_cumulative_y_ = 0;
@@ -3215,14 +3236,16 @@ OpenScarlettGameInputBroadcastWindowEvent(
     return GAMEINPUT_S_OK;
 }
 
-bool OPENSCARLETT_GAMEINPUT_CALL OpenScarlettGameInputIsCursorLocked(IGameInput* input) {
+OPENSCARLETT_GAMEINPUT_API bool OPENSCARLETT_GAMEINPUT_CALL
+OpenScarlettGameInputIsCursorLocked(IGameInput* input) {
     if (!input) {
         return false;
     }
     return static_cast<GameInputImpl*>(input)->IsCursorLocked();
 }
 
-void OPENSCARLETT_GAMEINPUT_CALL OpenScarlettGameInputSetCursorLocked(
+OPENSCARLETT_GAMEINPUT_API void OPENSCARLETT_GAMEINPUT_CALL
+OpenScarlettGameInputSetCursorLocked(
     IGameInput* input,
     bool locked) {
     if (!input) {
@@ -3232,7 +3255,8 @@ void OPENSCARLETT_GAMEINPUT_CALL OpenScarlettGameInputSetCursorLocked(
     RecordOk("OpenScarlettGameInputSetCursorLocked");
 }
 
-bool OPENSCARLETT_GAMEINPUT_CALL OpenScarlettGameInputIsAnyCursorLocked(void) {
+OPENSCARLETT_GAMEINPUT_API bool OPENSCARLETT_GAMEINPUT_CALL
+OpenScarlettGameInputIsAnyCursorLocked(void) {
     return g_openscarlett_active_cursor_locks.load(std::memory_order_acquire) > 0;
 }
 

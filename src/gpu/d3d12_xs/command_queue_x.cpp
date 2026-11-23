@@ -31,6 +31,7 @@ struct WindowCallbackState {
     std::atomic<bool> in_fullscreen_toggle{false};
     std::atomic<uint64_t> alt_enter_toggle_count{0ull};
     std::atomic<bool> raw_mouse_registered{false};
+    std::atomic<bool> raw_mouse_packets_seen{false};
     std::atomic<bool> gi_target_hwnd_sent{false};
     std::atomic<bool> cursor_clipped{false};
 
@@ -428,6 +429,7 @@ LRESULT CALLBACK SubclassWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 break;
             }
             case WM_INPUT: {
+                state->raw_mouse_packets_seen.store(true, std::memory_order_release);
                 BroadcastRawInputToGameInput(reinterpret_cast<void*>(lParam));
                 break;
             }
@@ -3498,7 +3500,8 @@ HRESULT STDMETHODCALLTYPE CommandQueueX::PresentX(
                     if (ClipCursor(&sr) != FALSE) {
                         window_state_->cursor_clipped.store(true, std::memory_order_release);
                     }
-                    if (user_cursor_locked && !cursor_hidden) {
+                    if (user_cursor_locked && !cursor_hidden &&
+                        window_state_->raw_mouse_packets_seen.load(std::memory_order_acquire)) {
                         SetCursorPos((sr.left + sr.right) / 2, (sr.top + sr.bottom) / 2);
                     }
                 }

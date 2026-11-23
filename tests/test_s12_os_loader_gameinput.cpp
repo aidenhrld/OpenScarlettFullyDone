@@ -881,6 +881,19 @@ void TestGameInputS12() {
     OS_REQUIRE(!is_locked(gi));
     OS_REQUIRE(!any_locked());
 
+    // Verify OPENSCARLETT_CURSOR_LOCK=1 initializes locked & releasing decrements global lock count
+    char prev_lock_env[32]{};
+    const DWORD prev_lock_len = ::GetEnvironmentVariableA(
+        "OPENSCARLETT_CURSOR_LOCK", prev_lock_env, static_cast<DWORD>(sizeof(prev_lock_env)));
+    ::SetEnvironmentVariableA("OPENSCARLETT_CURSOR_LOCK", "1");
+    IGameInput* env_gi = nullptr;
+    OS_REQUIRE(GameInputCreate(&env_gi) == GAMEINPUT_S_OK && env_gi != nullptr);
+    OS_REQUIRE(is_locked(env_gi));
+    OS_REQUIRE(any_locked());
+    env_gi->Release();
+    OS_REQUIRE(!any_locked());
+    ::SetEnvironmentVariableA("OPENSCARLETT_CURSOR_LOCK", prev_lock_len > 0u ? prev_lock_env : nullptr);
+
     gi->Release();
     std::printf("[PASS] GameInput user-before-connect, rumble+triggers, ordinal #1, window events & TLS telemetry\n");
 }
