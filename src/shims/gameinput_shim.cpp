@@ -1513,9 +1513,19 @@ LiveGameInputRegistry& GetLiveGameInputRegistry() {
     return *reg;
 }
 
+std::atomic<int> g_openscarlett_active_cursor_locks{0};
+
 class GameInputImpl final : public IGameInput, public IGameInputEx {
 public:
     GameInputImpl() {
+        char* env_lock = nullptr;
+        size_t env_len = 0;
+        if (_dupenv_s(&env_lock, &env_len, "OPENSCARLETT_CURSOR_LOCK") == 0 && env_lock != nullptr) {
+            if (env_lock[0] == '1' && env_lock[1] == '\0') {
+                SetCursorLocked(true);
+            }
+            std::free(env_lock);
+        }
         default_device_ = CreateTrackedDevice(
             0u,
             GameInputKindGamepad | GameInputKindController | GameInputKindUiNavigation,
@@ -1567,7 +1577,19 @@ public:
         reg.instances.insert(this);
     }
 
+    void SetCursorLocked(bool locked) noexcept {
+        const bool prev = cursor_lock_enabled_.exchange(locked, std::memory_order_acq_rel);
+        if (prev != locked) {
+            g_openscarlett_active_cursor_locks.fetch_add(locked ? 1 : -1, std::memory_order_acq_rel);
+        }
+    }
+
+    bool IsCursorLocked() const noexcept {
+        return cursor_lock_enabled_.load(std::memory_order_acquire);
+    }
+
     ~GameInputImpl() {
+        SetCursorLocked(false);
         {
             auto& reg = GetLiveGameInputRegistry();
             std::lock_guard<std::mutex> lk(reg.mutex);
@@ -2588,6 +2610,20 @@ private:
 
     void PollFallbackCursorMouseLocked() noexcept {
 #if defined(_WIN32)
+        HWND fg = ::GetForegroundWindow();
+        DWORD fg_pid = 0;
+        const bool fg_owned = (fg != nullptr &&
+                               ::GetWindowThreadProcessId(fg, &fg_pid) != 0 &&
+                               fg_pid == ::GetCurrentProcessId());
+        if (fg_owned) {
+            const bool f8_down = (::GetAsyncKeyState(VK_F8) & 0x8000) != 0;
+            if (f8_down && !f8_prev_down_) {
+                SetCursorLocked(!IsCursorLocked());
+            }
+            f8_prev_down_ = f8_down;
+        } else {
+            f8_prev_down_ = false;
+        }
         POINT pt{};
         if (::GetCursorPos(&pt) != FALSE) {
             if (cursor_fallback_valid_) {
@@ -2603,6 +2639,15 @@ private:
             }
             cursor_fallback_last_ = pt;
             cursor_fallback_valid_ = true;
+            if (fg_owned && IsCursorLocked()) {
+                RECT cr{};
+                if (::GetClientRect(fg, &cr) != FALSE && cr.right > cr.left && cr.bottom > cr.top) {
+                    POINT center{(cr.left + cr.right) / 2, (cr.top + cr.bottom) / 2};
+                    ::ClientToScreen(fg, &center);
+                    ::SetCursorPos(center.x, center.y);
+                    cursor_fallback_last_ = center;
+                }
+            }
         }
         fallback_mouse_buttons_ = PollHostMouseButtonsMask();
 #endif
@@ -2726,6 +2771,8 @@ private:
     std::vector<GameInputKeyState> injected_keys_;
 
     std::atomic<bool> raw_mouse_registered_{false};
+    std::atomic<bool> cursor_lock_enabled_{false};
+    bool f8_prev_down_{false};
     std::mutex raw_mouse_mutex_;
     int64_t mouse_cumulative_x_ = 0;
     int64_t mouse_cumulative_y_ = 0;
@@ -3166,6 +3213,27 @@ OpenScarlettGameInputBroadcastWindowEvent(
         inst->Release();
     }
     return GAMEINPUT_S_OK;
+}
+
+bool OPENSCARLETT_GAMEINPUT_CALL OpenScarlettGameInputIsCursorLocked(IGameInput* input) {
+    if (!input) {
+        return false;
+    }
+    return static_cast<GameInputImpl*>(input)->IsCursorLocked();
+}
+
+void OPENSCARLETT_GAMEINPUT_CALL OpenScarlettGameInputSetCursorLocked(
+    IGameInput* input,
+    bool locked) {
+    if (!input) {
+        return;
+    }
+    static_cast<GameInputImpl*>(input)->SetCursorLocked(locked);
+    RecordOk("OpenScarlettGameInputSetCursorLocked");
+}
+
+bool OPENSCARLETT_GAMEINPUT_CALL OpenScarlettGameInputIsAnyCursorLocked(void) {
+    return g_openscarlett_active_cursor_locks.load(std::memory_order_acquire) > 0;
 }
 
 }  // extern "C"

@@ -146,6 +146,17 @@ bool BroadcastWindowEventToGameInput(
     return false;
 }
 
+bool IsGameInputCursorLocked() noexcept {
+    using PfnIsAnyCursorLocked = bool(__cdecl*)();
+    HMODULE gi_mod = GetModuleHandleW(L"GameInput.dll");
+    if (!gi_mod) {
+        return false;
+    }
+    auto fn = reinterpret_cast<PfnIsAnyCursorLocked>(
+        reinterpret_cast<void*>(GetProcAddress(gi_mod, "OpenScarlettGameInputIsAnyCursorLocked")));
+    return fn ? fn() : false;
+}
+
 void TryRegisterRawMouseForWindow(HWND hwnd, WindowCallbackState& state) noexcept {
     if (!hwnd || IsWindow(hwnd) == FALSE || IsWindowVisible(hwnd) == FALSE) {
         return;
@@ -406,6 +417,14 @@ LRESULT CALLBACK SubclassWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                     ClipCursor(nullptr);
                 }
                 BroadcastWindowEventToGameInput(hwnd, kGiWinEventFocus, 0, 0);
+                break;
+            }
+            case WM_SETCURSOR: {
+                if (LOWORD(lParam) == HTCLIENT && state->is_active.load(std::memory_order_acquire) &&
+                    IsGameInputCursorLocked()) {
+                    SetCursor(nullptr);
+                    return TRUE;
+                }
                 break;
             }
             case WM_INPUT: {
@@ -3467,7 +3486,8 @@ HRESULT STDMETHODCALLTYPE CommandQueueX::PresentX(
             ci.cbSize = sizeof(ci);
             const bool cursor_hidden =
                 (GetCursorInfo(&ci) != FALSE) && ((ci.flags & CURSOR_SHOWING) == 0u);
-            if (focused && cursor_hidden) {
+            const bool user_cursor_locked = IsGameInputCursorLocked();
+            if (focused && (cursor_hidden || user_cursor_locked)) {
                 RECT cr{};
                 if (GetClientRect(target_hwnd, &cr) != FALSE && cr.right > cr.left && cr.bottom > cr.top) {
                     POINT tl{cr.left, cr.top};
@@ -3477,6 +3497,9 @@ HRESULT STDMETHODCALLTYPE CommandQueueX::PresentX(
                     RECT sr{tl.x, tl.y, br.x, br.y};
                     if (ClipCursor(&sr) != FALSE) {
                         window_state_->cursor_clipped.store(true, std::memory_order_release);
+                    }
+                    if (user_cursor_locked && !cursor_hidden) {
+                        SetCursorPos((sr.left + sr.right) / 2, (sr.top + sr.bottom) / 2);
                     }
                 }
             } else if (window_state_->cursor_clipped.exchange(false, std::memory_order_acq_rel)) {

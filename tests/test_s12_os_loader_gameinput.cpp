@@ -862,6 +862,25 @@ void TestGameInputS12() {
         OS_REQUIRE(snap2[0].ok_calls == 25ull);
     }
 
+    using PfnIsCursorLocked = bool(OPENSCARLETT_GAMEINPUT_CALL*)(IGameInput*);
+    using PfnSetCursorLocked = void(OPENSCARLETT_GAMEINPUT_CALL*)(IGameInput*, bool);
+    using PfnIsAnyCursorLocked = bool(OPENSCARLETT_GAMEINPUT_CALL*)();
+    auto is_locked = reinterpret_cast<PfnIsCursorLocked>(
+        reinterpret_cast<void*>(::GetProcAddress(gi_mod, "OpenScarlettGameInputIsCursorLocked")));
+    auto set_locked = reinterpret_cast<PfnSetCursorLocked>(
+        reinterpret_cast<void*>(::GetProcAddress(gi_mod, "OpenScarlettGameInputSetCursorLocked")));
+    auto any_locked = reinterpret_cast<PfnIsAnyCursorLocked>(
+        reinterpret_cast<void*>(::GetProcAddress(gi_mod, "OpenScarlettGameInputIsAnyCursorLocked")));
+    OS_REQUIRE(is_locked != nullptr && set_locked != nullptr && any_locked != nullptr);
+    OS_REQUIRE(!is_locked(gi));
+    OS_REQUIRE(!any_locked());
+    set_locked(gi, true);
+    OS_REQUIRE(is_locked(gi));
+    OS_REQUIRE(any_locked());
+    set_locked(gi, false);
+    OS_REQUIRE(!is_locked(gi));
+    OS_REQUIRE(!any_locked());
+
     gi->Release();
     std::printf("[PASS] GameInput user-before-connect, rumble+triggers, ordinal #1, window events & TLS telemetry\n");
 }

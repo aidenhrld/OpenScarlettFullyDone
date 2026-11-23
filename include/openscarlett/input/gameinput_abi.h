@@ -498,6 +498,15 @@ OpenScarlettGameInputBroadcastWindowEvent(
     int32_t param1,
     int32_t param2);
 
+OPENSCARLETT_GAMEINPUT_API bool OPENSCARLETT_GAMEINPUT_CALL
+OpenScarlettGameInputIsCursorLocked(IGameInput* input);
+
+OPENSCARLETT_GAMEINPUT_API void OPENSCARLETT_GAMEINPUT_CALL
+OpenScarlettGameInputSetCursorLocked(IGameInput* input, bool locked);
+
+OPENSCARLETT_GAMEINPUT_API bool OPENSCARLETT_GAMEINPUT_CALL
+OpenScarlettGameInputIsAnyCursorLocked(void);
+
 #ifdef __cplusplus
 }
 #endif
